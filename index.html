@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1a231b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Avian Capture">
+  <link rel="manifest" href="manifest.json">
+  <title>Avian Field Capture</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    *{-webkit-tap-highlight-color:transparent}
+    body{margin:0;padding:0;overscroll-behavior:none}
+    input,select,textarea{-webkit-appearance:none;border-radius:0.5rem}
+    .min-h-screen{min-height:100dvh;padding-bottom:env(safe-area-inset-bottom)}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback,useRef}=React;
+
+/* ══════════ CONSTANTS ══════════ */
+const BAND_COLORS=[{name:"Red",abbr:"R",hex:"#dc2626"},{name:"Orange",abbr:"O",hex:"#ea580c"},{name:"Yellow",abbr:"Y",hex:"#eab308"},{name:"Green",abbr:"G",hex:"#16a34a"},{name:"Blue",abbr:"B",hex:"#2563eb"},{name:"Lt Blue",abbr:"LB",hex:"#38bdf8"},{name:"White",abbr:"W",hex:"#e8e8e8"},{name:"Black",abbr:"K",hex:"#1a1a1a"},{name:"Pink",abbr:"P",hex:"#ec4899"},{name:"Purple",abbr:"V",hex:"#9333ea"},{name:"Dk Green",abbr:"DG",hex:"#15803d"},{name:"Silver",abbr:"S",hex:"#9ca3af"},{name:"Metal",abbr:"M",hex:"#71717a"}];
+const SPECIES_LIST=[{common:"Florida Scrub-Jay",alpha:"FSCJ"},{common:"Tree Swallow",alpha:"TRES"},{common:"Purple Martin",alpha:"PUMA"},{common:"Other",alpha:""}];
+const AGE_CLASSES=["HY","SY","ASY","AHY","TY","ATY","Unknown"];
+const SEX_OPTIONS=["Male","Female","Unknown"];
+const STATUS_OPTIONS=["Breeder","Helper","Disperser","Juvenile","Unpaired","Unknown"];
+const CAPTURE_METHODS=["Potter trap","Whoosh net","Mist net","Hand capture","Other"];
+const CAPTURE_STATUS=["N - New","R - Recapture","L - Return","F - Foreign","U - Unbanded"];
+const POX_REGIONS=["Feet","Toes","Tarsus","Beak/Nares","Periorbital","Auricular","Body/Wings"];
+const POX_SEVERITY=[{label:"0",full:"0 - None",desc:"No visible lesions"},{label:"1",full:"1 - Mild",desc:"Small discrete lesions (<2mm), few, no functional impact"},{label:"2",full:"2 - Moderate",desc:"Multiple/coalescent (2-5mm), mild swelling, minimal impairment"},{label:"3",full:"3 - Severe",desc:"Large masses (>5mm), significant swelling, impaired function"}];
+const SAMPLE_TYPES=["Blood","Feathers","Fecal","Ectoparasites"];
+const FAT_SCORES=[{v:"0",desc:"No visible fat in furculum"},{v:"1",desc:"Trace fat in furculum"},{v:"2",desc:"Furculum ~half full"},{v:"3",desc:"Furculum level/full"},{v:"4",desc:"Furculum bulging, abdominal fat"},{v:"5",desc:"Fat pads bulging, extensive abdominal"}];
+const SKULL_SCORES=[{v:"0",desc:"0% - No pneumatization"},{v:"1",desc:"~25% pneumatized"},{v:"2",desc:"~50% pneumatized"},{v:"3",desc:"~75% pneumatized"},{v:"4",desc:"~95% pneumatized, small window"},{v:"5",desc:"100% - Fully pneumatized"},{v:"X",desc:"Could not examine"}];
+const BP_SCORES=[{v:"0",desc:"No brood patch"},{v:"1",desc:"Smooth, defeathered, slightly vascularized"},{v:"2",desc:"Vascularized, some edema"},{v:"3",desc:"Heavy edema, wrinkled"},{v:"4",desc:"Refeathering, edema reduced"},{v:"5",desc:"Fully refeathered, trace wrinkling"}];
+const CP_SCORES=[{v:"0",desc:"No cloacal protuberance"},{v:"1",desc:"Small, not fully developed"},{v:"2",desc:"Medium, clearly enlarged"},{v:"3",desc:"Large, fully developed"}];
+const NEST_BUILDING=["0 - None","1 - Minimal material","2 - Partial cup/cavity lining","3 - Complete but sparse","4 - Well-built, nearly ready","5 - Complete, lined, ready for eggs"];
+const EGG_STAGES=["Unincubated/Fresh","Early incubation","Mid incubation","Late incubation","Pipping","Hatching"];
+const NEST_FATES=["Active","Successful - Fledged","Failed - Predation","Failed - Abandoned","Failed - Weather","Failed - Parasites","Failed - Unknown","Unknown"];
+
+const KEYS={birds:"avian-capture-birds-v4",nests:"avian-capture-nests-v4",prefs:"avian-capture-prefs-v4",draft:"avian-capture-draft-v4",queue:"avian-capture-sync-queue"};
+
+/* ══════════ HELPERS ══════════ */
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
+function localDT(){const n=new Date();return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}T${String(n.getHours()).padStart(2,"0")}:${String(n.getMinutes()).padStart(2,"0")}`}
+function todayStr(){return new Date().toISOString().split("T")[0]}
+function ls(k){try{const v=localStorage.getItem(k);return v?JSON.parse(v):null}catch{return null}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch{}}
+function lsDel(k){try{localStorage.removeItem(k)}catch{}}
+
+function blankBird(pf={}){
+  return {id:uid(),datetime:localDT(),observer:pf.observer||"",territory:pf.territory||"",species:pf.species||"",speciesOther:pf.speciesOther||"",captureStatus:"",bandNumber:"",bandCombo:"",bandLeg1:[],bandLeg2:[],nestBox:"",age:"",sex:"",status:"",captureMethod:pf.captureMethod||"",wingChord:"",tarsus:"",tailLength:"",mass:"",billLength:"",billDepth:"",fatScore:"",skull:"",broodPatch:"",cloacalProt:"",pox:POX_REGIONS.reduce((a,r)=>({...a,[r]:"0 - None"}),{}),poxNotes:"",samples:{Blood:false,Feathers:false,Fecal:false,Ectoparasites:false},bloodVolume:"",ectoCount:"",featherCount:"",sampleNotes:"",lat:"",lng:"",notes:""};
+}
+function blankNest(pf={}){
+  return {id:uid(),datetime:localDT(),observer:pf.observer||"",territory:pf.territory||"",species:pf.species||"",speciesOther:pf.speciesOther||"",nestBoxID:pf.nestBoxID||"",lat:"",lng:"",nestBuilding:"",clutchSize:"",eggStage:"",numHatched:"",nestlingCount:"",nestlingAge:"",fledgeCount:"",nestFate:"Active",blowflyLarvae:"",mitePresence:"",nestParasiteNotes:"",notes:""};
+}
+
+function birdToRow(r){
+  const sp=r.species==="Other"?(r.speciesOther||"Other"):(SPECIES_LIST.find(s=>s.common===r.species)?.alpha||r.species||"");
+  return {Date:r.datetime?.split("T")[0]||"",Time:r.datetime?.split("T")[1]||"",Observer:r.observer,Territory:r.territory,Species:sp,CaptureStatus:(r.captureStatus||"").split(" - ")[0]||"",BandNumber:r.bandNumber,BandCombo:r.bandCombo,NestBox:r.nestBox,Lat:r.lat,Lng:r.lng,Age:r.age,Sex:r.sex,Status:r.status,CaptureMethod:r.captureMethod,WingChord_mm:r.wingChord,Tarsus_mm:r.tarsus,TailLength_mm:r.tailLength,Mass_g:r.mass,BillLength_mm:r.billLength,BillDepth_mm:r.billDepth,FatScore:r.fatScore,Skull:r.skull,BroodPatch:r.broodPatch,CloacalProt:r.cloacalProt,...POX_REGIONS.reduce((a,reg)=>({...a,[`Pox_${reg.replace(/[\/\s]/g,"_")}`]:parseInt(r.pox?.[reg]||"0")}),{}),PoxNotes:r.poxNotes,Blood:r.samples?.Blood?"Y":"N",BloodVolume_uL:r.bloodVolume,Feathers:r.samples?.Feathers?"Y":"N",FeatherCount:r.featherCount,Fecal:r.samples?.Fecal?"Y":"N",Ectoparasites:r.samples?.Ectoparasites?"Y":"N",EctoCount:r.ectoCount,SampleNotes:r.sampleNotes,Notes:r.notes};
+}
+function nestToRow(r){
+  const sp=r.species==="Other"?(r.speciesOther||"Other"):(SPECIES_LIST.find(s=>s.common===r.species)?.alpha||r.species||"");
+  return {Date:r.datetime?.split("T")[0]||"",Time:r.datetime?.split("T")[1]||"",Observer:r.observer,Territory:r.territory,Species:sp,NestBoxID:r.nestBoxID,Lat:r.lat,Lng:r.lng,NestBuildingActivity:(r.nestBuilding||"").split(" - ")[0]||"",ClutchSize:r.clutchSize,EggStage:r.eggStage,NumHatched:r.numHatched,NestlingCount:r.nestlingCount,NestlingAge_days:r.nestlingAge,FledgeCount:r.fledgeCount,NestFate:r.nestFate,BlowflyLarvae:r.blowflyLarvae,MitePresence:r.mitePresence,NestParasiteNotes:r.nestParasiteNotes,Notes:r.notes};
+}
+
+function toCSV(records,rowFn){
+  if(!records.length) return "";
+  const rows=records.map(rowFn),headers=Object.keys(rows[0]);
+  const numCols=new Set(["Lat","Lng","WingChord_mm","Tarsus_mm","TailLength_mm","Mass_g","BillLength_mm","BillDepth_mm","BloodVolume_uL","EctoCount","FeatherCount","FatScore","Skull","BroodPatch","CloacalProt","Pox_Feet","Pox_Toes","Pox_Tarsus","Pox_Beak_Nares","Pox_Periorbital","Pox_Auricular","Pox_Body_Wings","ClutchSize","NumHatched","NestlingCount","NestlingAge_days","FledgeCount","BlowflyLarvae","NestBuildingActivity"]);
+  const escT=v=>`"${String(v??"").replace(/"/g,'""')}"`;
+  const fmt=(h,v)=>{if(numCols.has(h)){const s=String(v??"").trim();if(s===""||s==="X") return s==="X"?escT(s):"";const n=Number(s);return isNaN(n)?escT(s):String(n)} return escT(v)};
+  return "\ufeff"+[headers.map(escT).join(","),...rows.map(r=>headers.map(h=>fmt(h,r[h])).join(","))].join("\n");
+}
+
+/* ══════════ GOOGLE SHEETS SYNC ══════════ */
+async function syncToSheet(scriptUrl,type,record){
+  if(!scriptUrl) return false;
+  const row=type==="bird"?birdToRow(record):nestToRow(record);
+  try{
+    await fetch(scriptUrl,{method:"POST",mode:"no-cors",body:JSON.stringify({type,record:row}),headers:{"Content-Type":"text/plain"}});
+    return true; // no-cors: if fetch didn't throw, request was sent
+  }catch{return false}
+}
+
+function queueSync(type,record){
+  const q=ls(KEYS.queue)||[];
+  q.push({type,record,ts:Date.now()});
+  lsSet(KEYS.queue,q);
+}
+
+async function flushQueue(scriptUrl){
+  if(!scriptUrl) return 0;
+  const q=ls(KEYS.queue)||[];
+  if(!q.length) return 0;
+  let synced=0;
+  const remaining=[];
+  for(const item of q){
+    const ok=await syncToSheet(scriptUrl,item.type,item.record);
+    if(ok) synced++; else remaining.push(item);
+  }
+  lsSet(KEYS.queue,remaining);
+  return synced;
+}
+
+/* ══════════ THEME ══════════ */
+function t(sun){
+  if(sun) return {bg:"#f5f0e0",bgCard:"#ebe5d0",bgInput:"#ded8c0",border:"#b0a880",borderActive:"#5a6a2a",text:"#1a1a0a",textMuted:"#4a4a30",textDim:"#7a7a5a",accent:"#3a5a1a",accentBg:"#4a6a2a",accentText:"#f5f0e0",danger:"#8a2a2a",dangerBg:"#e8c0c0",infoBg:"#c0d8e8",infoText:"#1a3a5a",inputText:"#1a1a0a",tagBg:"#d0cbb0",poxWarn:"#8a2020",poxWarnBg:"#e8c0c0",tabActiveBg:"#3a5a1a",tabActiveText:"#f5f0e0",tabInactiveText:"#6a6a4a"};
+  return {bg:"#1a231b",bgCard:"#232e24",bgInput:"#2d3a2e",border:"#4a5e3a",borderActive:"#6b8a4a",text:"#e8e6d9",textMuted:"#a3b18a",textDim:"#6b7a5a",accent:"#c8e6a0",accentBg:"#4a6a2a",accentText:"#e8e6d9",danger:"#e8a0a0",dangerBg:"#5a2a2a",infoBg:"#2a3a4a",infoText:"#a0c8e8",inputText:"#e8e6d9",tagBg:"#2d3a2e",poxWarn:"#e8a0a0",poxWarnBg:"#5a2a2a",tabActiveBg:"#4a5e3a",tabActiveText:"#e8e6d9",tabInactiveText:"#7a8a6a"};
+}
+
+/* ══════════ UI COMPONENTS ══════════ */
+function Fld({label,children,span2,c}){
+  return <div className={span2?"col-span-2":""}><label className="block font-bold uppercase tracking-wider mb-1" style={{fontSize:11,color:c.textMuted}}>{label}</label>{children}</div>;
+}
+function Inp({value,onChange,type="text",placeholder,min,max,step,c,large}){
+  return <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} min={min} max={max} step={step} className="w-full rounded-lg outline-none" style={{background:c.bgInput,border:`1.5px solid ${c.border}`,color:c.inputText,fontFamily:"'JetBrains Mono','Fira Code',monospace",fontSize:large?18:16,padding:"12px 14px"}}/>;
+}
+function Sel({value,onChange,options,placeholder,c}){
+  return <select value={value} onChange={e=>onChange(e.target.value)} className="w-full rounded-lg outline-none appearance-none" style={{background:c.bgInput,border:`1.5px solid ${c.border}`,color:value?c.inputText:c.textDim,fontSize:16,padding:"12px 14px",fontFamily:"'JetBrains Mono','Fira Code',monospace"}}><option value="" style={{color:c.textDim}}>{placeholder||"Select..."}</option>{options.map(o=> <option key={o} value={o} style={{color:c.inputText,background:c.bgInput}}>{o}</option>)}</select>;
+}
+function Tog({checked,onChange,label,c}){
+  return <button onClick={()=>onChange(!checked)} className="flex items-center gap-3 rounded-lg w-full transition-all" style={{background:checked?c.accentBg:c.bgInput,border:checked?`2px solid ${c.borderActive}`:`1.5px solid ${c.border}`,color:checked?c.accentText:c.textDim,padding:"14px 16px",minHeight:52}}><span style={{fontSize:20}}>{checked?"◉":"○"}</span><span className="font-semibold" style={{fontSize:15}}>{label}</span></button>;
+}
+function ScorePicker({value,onChange,scores,c,label}){
+  const cur=scores.find(s=>s.v===value);
+  return (<Fld label={label} span2 c={c}><div className="flex gap-1.5 flex-wrap">{scores.map(s=>{const active=value===s.v;return <button key={s.v} onClick={()=>onChange(s.v)} className="rounded-lg font-bold" style={{minWidth:44,minHeight:48,fontSize:15,background:active?c.accentBg:c.bgInput,border:`2px solid ${active?c.borderActive:c.border}`,color:active?c.accentText:c.textDim,opacity:active?1:0.55,padding:"6px 10px"}}>{s.v}</button>})}</div>{cur&&value!==""&&<p className="mt-1" style={{fontSize:11,color:c.textDim}}>{cur.desc}</p>}</Fld>);
+}
+function SpeciesSelect({value,speciesOther,onChange,onOtherChange,c}){
+  return (<Fld label="Species" span2 c={c}>
+    <select value={value} onChange={e=>onChange(e.target.value)} className="w-full rounded-lg outline-none appearance-none" style={{background:c.bgInput,border:`1.5px solid ${c.border}`,color:value?c.inputText:c.textDim,fontSize:16,padding:"12px 14px",fontFamily:"'JetBrains Mono','Fira Code',monospace"}}>
+      <option value="" style={{color:c.textDim}}>Select species...</option>
+      {SPECIES_LIST.map(s=> <option key={s.common} value={s.common} style={{color:c.inputText,background:c.bgInput}}>{s.alpha?`${s.alpha} — ${s.common}`:s.common}</option>)}
+    </select>
+    {value==="Other"&&<div className="mt-2"><Inp value={speciesOther} onChange={onOtherChange} placeholder="Enter species name" c={c}/></div>}
+  </Fld>);
+}
+function GPSField({rec,setField,getGPS,gpsLoading,c}){
+  return (<Fld label="GPS" span2 c={c}>
+    <div className="flex gap-2 mb-2">
+      <button onClick={getGPS} className="flex-1 rounded-lg font-bold flex items-center justify-center gap-2" style={{fontSize:14,minHeight:48,background:rec.lat?c.accentBg:c.bgInput,border:`1.5px solid ${rec.lat?c.borderActive:c.border}`,color:rec.lat?c.accentText:c.textMuted}}>
+        {gpsLoading?"Locating...":rec.lat?`📍 ${Number(rec.lat).toFixed(4)}, ${Number(rec.lng).toFixed(4)}`:"📍 Auto GPS"}
+      </button>
+    </div>
+    <div className="grid grid-cols-2 gap-2">
+      <Inp type="number" value={rec.lat} onChange={v=>setField("lat",v)} placeholder="Lat" step="0.0001" c={c}/>
+      <Inp type="number" value={rec.lng} onChange={v=>setField("lng",v)} placeholder="Lng" step="0.0001" c={c}/>
+    </div>
+  </Fld>);
+}
+
+/* ══════════ BAND COMBO BUILDER ══════════ */
+function BandBuilder({leg1,leg2,setLeg1,setLeg2,comboText,setComboText,c}){
+  const[activeLeg,setActiveLeg]=useState(1);
+  const[show,setShow]=useState(false);
+  const add=abbr=>{const tgt=activeLeg===1?leg1:leg2;const n=[...tgt,abbr];activeLeg===1?setLeg1(n):setLeg2(n);upd(activeLeg===1?n:leg1,activeLeg===2?n:leg2)};
+  const upd=(l1,l2)=>{const fmt=a=>a.join("/");setComboText(l2.length?`${fmt(l1)}-${fmt(l2)}`:fmt(l1))};
+  const undo=()=>{if(activeLeg===1&&leg1.length){const n=leg1.slice(0,-1);setLeg1(n);upd(n,leg2)}else if(activeLeg===2&&leg2.length){const n=leg2.slice(0,-1);setLeg2(n);upd(leg1,n)}};
+  const clear=()=>{setLeg1([]);setLeg2([]);setComboText("")};
+  return (<div>
+    <div className="flex gap-2 mb-2">
+      <div className="flex-1"><Inp value={comboText} onChange={setComboText} placeholder="R/S-G,M or tap ▼" c={c} large/></div>
+      <button onClick={()=>setShow(!show)} className="rounded-lg font-bold flex items-center justify-center shrink-0" style={{width:52,minHeight:48,background:show?c.tabActiveBg:c.bgInput,border:`1.5px solid ${show?c.borderActive:c.border}`,color:show?c.tabActiveText:c.textMuted,fontSize:22}}>{show?"×":"🎨"}</button>
+    </div>
+    {show&&(<div className="rounded-lg p-3 mb-1" style={{background:c.bgCard,border:`1px solid ${c.border}`}}>
+      <div className="flex gap-2 mb-3">{[1,2].map(n=>{const bands=n===1?leg1:leg2;return (
+        <button key={n} onClick={()=>setActiveLeg(n)} className="flex-1 rounded-lg py-2.5 font-bold uppercase tracking-wider" style={{fontSize:11,minHeight:48,background:activeLeg===n?c.tabActiveBg:c.bgInput,border:`2px solid ${activeLeg===n?c.borderActive:c.border}`,color:activeLeg===n?c.tabActiveText:c.textDim}}>
+          <div>Leg {n}</div>
+          <div className="mt-0.5 flex gap-1 justify-center">{bands.length?bands.map((b,i)=>{const bc=BAND_COLORS.find(x=>x.abbr===b);return <span key={i} className="inline-block rounded-full" style={{width:12,height:12,background:bc?.hex||"#888",border:b==="K"?"1px solid #666":"none"}}/>}):<span style={{fontSize:10}}>—</span>}</div>
+        </button>)})}</div>
+      <div className="grid grid-cols-5 gap-2 mb-3">{BAND_COLORS.map(bc=>(
+        <button key={bc.abbr} onClick={()=>add(bc.abbr)} className="rounded-lg flex flex-col items-center justify-center gap-1" style={{minHeight:52,background:c.bgInput,border:`1.5px solid ${c.border}`}}>
+          <span className="rounded-full" style={{width:22,height:22,background:bc.hex,border:bc.name==="Black"?`1px solid ${c.textDim}`:"none",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
+          <span style={{fontSize:9,color:c.textMuted,fontWeight:700}}>{bc.abbr}</span>
+        </button>))}</div>
+      <div className="flex gap-2">
+        <button onClick={undo} className="flex-1 rounded-lg font-bold uppercase" style={{fontSize:12,minHeight:48,background:c.bgInput,border:`1px solid ${c.border}`,color:c.textMuted}}>← Undo</button>
+        <button onClick={clear} className="flex-1 rounded-lg font-bold uppercase" style={{fontSize:12,minHeight:48,background:c.dangerBg,border:`1px solid ${c.danger}`,color:c.danger}}>Clear</button>
+      </div>
+    </div>)}
+  </div>);
+}
+
+/* ══════════ NEST CHECK FORM ══════════ */
+function NestForm({rec,setField,c,getGPS,gpsLoading}){
+  return (<div className="space-y-4">
+    <div className="grid grid-cols-2 gap-3">
+      <Fld label="Date / Time" span2 c={c}><Inp type="datetime-local" value={rec.datetime} onChange={v=>setField("datetime",v)} c={c}/></Fld>
+      <Fld label="Observer(s)" span2 c={c}><Inp value={rec.observer} onChange={v=>setField("observer",v)} placeholder="Initials" c={c}/></Fld>
+      <SpeciesSelect value={rec.species} speciesOther={rec.speciesOther} onChange={v=>setField("species",v)} onOtherChange={v=>setField("speciesOther",v)} c={c}/>
+      <Fld label="Nest Box ID" c={c}><Inp value={rec.nestBoxID} onChange={v=>setField("nestBoxID",v)} placeholder="e.g. NB-14" c={c}/></Fld>
+      <Fld label="Territory" c={c}><Inp value={rec.territory} onChange={v=>setField("territory",v)} placeholder="e.g. Q10" c={c}/></Fld>
+    </div>
+
+    <div className="rounded-lg p-3" style={{background:c.bgCard,border:`1px solid ${c.border}`}}>
+      <p className="font-bold uppercase tracking-wider mb-3" style={{fontSize:11,color:c.textMuted}}>Nest Building</p>
+      <Sel value={rec.nestBuilding} onChange={v=>setField("nestBuilding",v)} options={NEST_BUILDING} placeholder="Activity grade..." c={c}/>
+    </div>
+
+    <div className="rounded-lg p-3" style={{background:c.bgCard,border:`1px solid ${c.border}`}}>
+      <p className="font-bold uppercase tracking-wider mb-3" style={{fontSize:11,color:c.textMuted}}>Eggs</p>
+      <div className="grid grid-cols-2 gap-3">
+        <Fld label="Clutch Size" c={c}><Inp type="number" value={rec.clutchSize} onChange={v=>setField("clutchSize",v)} placeholder="0" min="0" c={c}/></Fld>
+        <Fld label="Egg Stage" c={c}><Sel value={rec.eggStage} onChange={v=>setField("eggStage",v)} options={EGG_STAGES} c={c}/></Fld>
+      </div>
+    </div>
+
+    <div className="rounded-lg p-3" style={{background:c.bgCard,border:`1px solid ${c.border}`}}>
+      <p className="font-bold uppercase tracking-wider mb-3" style={{fontSize:11,color:c.textMuted}}>Nestlings / Fledging</p>
+      <div className="grid grid-cols-2 gap-3">
+        <Fld label="# Hatched" c={c}><Inp type="number" value={rec.numHatched} onChange={v=>setField("numHatched",v)} placeholder="0" min="0" c={c}/></Fld>
+        <Fld label="Nestling Count" c={c}><Inp type="number" value={rec.nestlingCount} onChange={v=>setField("nestlingCount",v)} placeholder="0" min="0" c={c}/></Fld>
+        <Fld label="Nestling Age (days)" c={c}><Inp type="number" value={rec.nestlingAge} onChange={v=>setField("nestlingAge",v)} placeholder="0" min="0" c={c}/></Fld>
+        <Fld label="Fledge Count" c={c}><Inp type="number" value={rec.fledgeCount} onChange={v=>setField("fledgeCount",v)} placeholder="0" min="0" c={c}/></Fld>
+      </div>
+    </div>
+
+    <div className="rounded-lg p-3" style={{background:c.bgCard,border:`1px solid ${c.border}`}}>
+      <p className="font-bold uppercase tracking-wider mb-3" style={{fontSize:11,color:c.textMuted}}>Nest Fate</p>
+      <Sel value={rec.nestFate} onChange={v=>setField("nestFate",v)} options={NEST_FATES} c={c}/>
+    </div>
+
+    <div className="rounded-lg p-3" style={{background:c.bgCard,border:`1px solid ${c.border}`}}>
+      <p className="font-bold uppercase tracking-wider mb-3" style={{fontSize:11,color:c.textMuted}}>Nest Parasites</p>
+      <div className="grid grid-cols-2 gap-3">
+        <Fld label="Blowfly Larvae" c={c}><Inp type="number" value={rec.blowflyLarvae} onChange={v=>setField("blowflyLarvae",v)} placeholder="Count" min="0" c={c}/></Fld>
+        <Fld label="Mites" c={c}><Sel value={rec.mitePresence} onChange={v=>setField("mitePresence",v)} options={["None","Light","Moderate","Heavy"]} c={c}/></Fld>
+      </div>
+      <div className="mt-3"><Fld label="Parasite Notes" c={c}><Inp value={rec.nestParasiteNotes} onChange={v=>setField("nestParasiteNotes",v)} placeholder="Details..." c={c}/></Fld></div>
+    </div>
+
+    <GPSField rec={rec} setField={setField} getGPS={getGPS} gpsLoading={gpsLoading} c={c}/>
+
+    <Fld label="Notes" c={c}>
+      <textarea value={rec.notes} onChange={e=>setField("notes",e.target.value)} rows={4} placeholder="General observations..." className="w-full rounded-lg outline-none resize-none" style={{background:c.bgInput,border:`1.5px solid ${c.border}`,color:c.inputText,fontSize:16,padding:"12px 14px",fontFamily:"'JetBrains Mono',monospace"}}/>
+    </Fld>
+  </div>);
+}
+
+/* ══════════ BIRD CAPTURE FORM (Bird ID tab only — Measure/Samples/Notes remain the same as before) ══════════ */
+function BirdIDPanel({rec,setField,c,getGPS,gpsLoading}){
+  return (<div className="grid grid-cols-2 gap-3">
+    <Fld label="Date / Time" span2 c={c}><Inp type="datetime-local" value={rec.datetime} onChange={v=>setField("datetime",v)} c={c}/></Fld>
+    <Fld label="Observer(s)" span2 c={c}><Inp value={rec.observer} onChange={v=>setField("observer",v)} placeholder="Initials" c={c}/></Fld>
+    <SpeciesSelect value={rec.species} speciesOther={rec.speciesOther} onChange={v=>setField("species",v)} onOtherChange={v=>setField("speciesOther",v)} c={c}/>
+    <Fld label="Capture Status" span2 c={c}><Sel value={rec.captureStatus} onChange={v=>setField("captureStatus",v)} options={CAPTURE_STATUS} placeholder="N/R/L/F/U..." c={c}/></Fld>
+    <Fld label="USGS Band #" span2 c={c}><Inp value={rec.bandNumber} onChange={v=>setField("bandNumber",v)} placeholder="e.g. 2610-12345" c={c}/></Fld>
+    <Fld label="Color Band Combo" span2 c={c}>
+      <BandBuilder leg1={rec.bandLeg1} leg2={rec.bandLeg2} setLeg1={v=>setField("bandLeg1",v)} setLeg2={v=>setField("bandLeg2",v)} comboText={rec.bandCombo} setComboText={v=>setField("bandCombo",v)} c={c}/>
+    </Fld>
+    <Fld label="Territory" c={c}><Inp value={rec.territory} onChange={v=>setField("territory",v)} placeholder="e.g. Q10" c={c}/></Fld>
+    <Fld label="Nest Box" c={c}><Inp value={rec.nestBox} onChange={v=>setField("nestBox",v)} placeholder="e.g. NB-14" c={c}/></Fld>
+    <Fld label="Capture Method" c={c}><Sel value={rec.captureMethod} onChange={v=>setField("captureMethod",v)} options={CAPTURE_METHODS} c={c}/></Fld>
+    <Fld label="Age" c={c}><Sel value={rec.age} onChange={v=>setField("age",v)} options={AGE_CLASSES} c={c}/></Fld>
+    <Fld label="Sex" c={c}><Sel value={rec.sex} onChange={v=>setField("sex",v)} options={SEX_OPTIONS} c={c}/></Fld>
+    <Fld label="Status" c={c}><Sel value={rec.status} onChange={v=>setField("status",v)} options={STATUS_OPTIONS} c={c}/></Fld>
+    <GPSField rec={rec} setField={setField} getGPS={getGPS} gpsLoading={gpsLoading} c={c}/>
+  </div>);
+}
+
+function MeasurePanel({rec,setField,c}){
+  const morphs=[{key:"wingChord",label:"Wing Chord (mm)",ph:"e.g. 118.5"},{key:"tarsus",label:"Tarsus (mm)",ph:"e.g. 34.2"},{key:"tailLength",label:"Tail Length (mm)",ph:"e.g. 85.0"},{key:"mass",label:"Mass (g)",ph:"e.g. 79.4"},{key:"billLength",label:"Bill Length (mm)",ph:"e.g. 24.1"},{key:"billDepth",label:"Bill Depth (mm)",ph:"e.g. 11.3"}];
+  const setPox=(region,val)=>setField("pox",{...rec.pox,[region]:val});
+  const hasPox=POX_REGIONS.some(r=>rec.pox?.[r]&&!rec.pox[r].startsWith("0"));
+  return (<div className="space-y-4">
+    <div className="grid grid-cols-2 gap-3">{morphs.map(f=> <Fld key={f.key} label={f.label} c={c}><Inp type="number" value={rec[f.key]} onChange={v=>setField(f.key,v)} placeholder={f.ph} step="0.1" min="0" c={c}/></Fld>)}</div>
+    <div className="rounded-lg p-3" style={{background:c.bgCard,border:`1px solid ${c.border}`}}>
+      <p className="font-bold uppercase tracking-wider mb-3" style={{fontSize:11,color:c.textMuted}}>Condition Scores</p>
+      <div className="space-y-3">
+        <ScorePicker label="Fat Score" value={rec.fatScore} onChange={v=>setField("fatScore",v)} scores={FAT_SCORES} c={c}/>
+        <ScorePicker label="Skull" value={rec.skull} onChange={v=>setField("skull",v)} scores={SKULL_SCORES} c={c}/>
+        <ScorePicker label="Brood Patch" value={rec.broodPatch} onChange={v=>setField("broodPatch",v)} scores={BP_SCORES} c={c}/>
+        <ScorePicker label="Cloacal Prot." value={rec.cloacalProt} onChange={v=>setField("cloacalProt",v)} scores={CP_SCORES} c={c}/>
+      </div>
+    </div>
+    <div className="rounded-lg p-3" style={{background:c.bgCard,border:`1px solid ${c.border}`}}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="font-bold uppercase tracking-wider" style={{fontSize:11,color:c.textMuted}}>Pox Scoring</p>
+        <span className="rounded px-2 py-0.5 font-bold uppercase" style={{fontSize:10,background:hasPox?c.poxWarnBg:c.bgInput,border:`1px solid ${hasPox?c.poxWarn:c.border}`,color:hasPox?c.poxWarn:c.textDim}}>{hasPox?"Pox Detected":"Clear"}</span>
+      </div>
+      <div className="space-y-3">{POX_REGIONS.map(region=>{
+        const current=rec.pox?.[region]||"0 - None";const currentSev=POX_SEVERITY.find(s=>s.full===current);
+        return (<div key={region}>
+          <label className="block font-bold uppercase tracking-wider mb-1.5" style={{fontSize:11,color:c.textMuted}}>{region}</label>
+          <div className="grid grid-cols-4 gap-2">{POX_SEVERITY.map(sev=>{
+            const active=current===sev.full;const sevN=parseInt(sev.label);
+            const cols={0:{bg:c.bgCard,border:c.borderActive,color:c.textMuted},1:{bg:"#4a4a2a",border:"#7a7a3a",color:"#e8e88a"},2:{bg:"#5a4020",border:"#9a6a2a",color:"#e8b86a"},3:{bg:c.dangerBg,border:c.danger,color:c.danger}};const cl=cols[sevN];
+            return <button key={sev.full} onClick={()=>setPox(region,sev.full)} className="rounded-lg font-bold transition-all" style={{minHeight:48,fontSize:16,background:active?cl.bg:c.bgInput,border:`2px solid ${active?cl.border:c.border}`,color:active?cl.color:c.textDim,opacity:active?1:0.6}}>{sev.label}</button>;
+          })}</div>
+          {currentSev&&parseInt(currentSev.label)>0&&<p className="mt-1" style={{fontSize:11,color:c.textDim}}>{currentSev.desc}</p>}
+        </div>);
+      })}</div>
+      <div className="mt-3"><Fld label="Pox Notes" c={c}><textarea value={rec.poxNotes} onChange={e=>setField("poxNotes",e.target.value)} rows={2} placeholder="Lesion descriptions..." className="w-full rounded-lg outline-none resize-none" style={{background:c.bgInput,border:`1.5px solid ${c.border}`,color:c.inputText,fontSize:16,padding:"12px 14px",fontFamily:"'JetBrains Mono',monospace"}}/></Fld></div>
+    </div>
+  </div>);
+}
+
+function SamplesPanel({rec,setField,c}){
+  const setSample=(type,val)=>setField("samples",{...rec.samples,[type]:val});
+  return (<div className="space-y-3">
+    <div className="grid grid-cols-2 gap-2">{SAMPLE_TYPES.map(type=> <Tog key={type} checked={rec.samples?.[type]} onChange={v=>setSample(type,v)} label={type} c={c}/>)}</div>
+    {rec.samples?.Blood&&<Fld label="Blood Volume (µL)" c={c}><Inp type="number" value={rec.bloodVolume} onChange={v=>setField("bloodVolume",v)} placeholder="150" min="0" c={c}/></Fld>}
+    {rec.samples?.Feathers&&<Fld label="Feather Count" c={c}><Inp type="number" value={rec.featherCount} onChange={v=>setField("featherCount",v)} placeholder="4" min="0" c={c}/></Fld>}
+    {rec.samples?.Ectoparasites&&<Fld label="Ectoparasite Count" c={c}><Inp type="number" value={rec.ectoCount} onChange={v=>setField("ectoCount",v)} placeholder="12" min="0" c={c}/></Fld>}
+    <Fld label="Sample Notes" c={c}><textarea value={rec.sampleNotes} onChange={e=>setField("sampleNotes",e.target.value)} rows={3} placeholder="Tube labels, hemolysis..." className="w-full rounded-lg outline-none resize-none" style={{background:c.bgInput,border:`1.5px solid ${c.border}`,color:c.inputText,fontSize:16,padding:"12px 14px",fontFamily:"'JetBrains Mono',monospace"}}/></Fld>
+  </div>);
+}
+
+function NotesPanel({rec,setField,c}){
+  return <Fld label="General Notes" c={c}><textarea value={rec.notes} onChange={e=>setField("notes",e.target.value)} rows={10} placeholder="Behavior, condition, recapture info..." className="w-full rounded-lg outline-none resize-none" style={{background:c.bgInput,border:`1.5px solid ${c.border}`,color:c.inputText,fontSize:16,padding:"12px 14px",fontFamily:"'JetBrains Mono',monospace"}}/></Fld>;
+}
+
+/* ══════════ MAIN APP ══════════ */
+const BIRD_TABS=[{label:"Bird",icon:"🐦"},{label:"Measure",icon:"📏"},{label:"Samples",icon:"🩸"},{label:"Notes",icon:"📝"}];
+
+function App(){
+  const[mode,setMode]=useState("birds"); // birds | nests | settings
+  const[birdRecords,setBirdRecords]=useState([]);
+  const[nestRecords,setNestRecords]=useState([]);
+  const[currentBird,setCurrentBird]=useState(blankBird());
+  const[currentNest,setCurrentNest]=useState(blankNest());
+  const[tab,setTab]=useState(0);
+  const[view,setView]=useState("form");
+  const[loading,setLoading]=useState(true);
+  const[toast,setToast]=useState(null);
+  const[confirmDelete,setConfirmDelete]=useState(null);
+  const[confirmClear,setConfirmClear]=useState(false);
+  const[sunlight,setSunlight]=useState(false);
+  const[gpsLoading,setGpsLoading]=useState(false);
+  const[unsaved,setUnsaved]=useState(false);
+  const[search,setSearch]=useState("");
+  const[scriptUrl,setScriptUrl]=useState("");
+  const[syncStatus,setSyncStatus]=useState("");
+  const draftTimer=useRef(null);
+  const c=t(sunlight);
+  const queueLen=(ls(KEYS.queue)||[]).length;
+
+  // Load
+  useEffect(()=>{
+    setBirdRecords(ls(KEYS.birds)||[]);
+    setNestRecords(ls(KEYS.nests)||[]);
+    const prefs=ls(KEYS.prefs)||{};
+    if(prefs.sunlight) setSunlight(true);
+    if(prefs.scriptUrl) setScriptUrl(prefs.scriptUrl);
+    setLoading(false);
+  },[]);
+
+  // Auto-save draft
+  useEffect(()=>{
+    if(unsaved){
+      draftTimer.current=setTimeout(()=>lsSet(KEYS.draft,{mode,bird:currentBird,nest:currentNest}),3000);
+    }
+    return ()=>{if(draftTimer.current) clearTimeout(draftTimer.current)};
+  },[currentBird,currentNest,unsaved,mode]);
+
+  const flash=msg=>{setToast(msg);setTimeout(()=>setToast(null),2500)};
+  const savePrefs=p=>{const cur=ls(KEYS.prefs)||{};lsSet(KEYS.prefs,{...cur,...p})};
+  const setBirdField=(k,v)=>{setCurrentBird(p=>({...p,[k]:v}));setUnsaved(true)};
+  const setNestField=(k,v)=>{setCurrentNest(p=>({...p,[k]:v}));setUnsaved(true)};
+
+  const getGPS=()=>{
+    if(!navigator.geolocation){flash("⚠ GPS not available");return}
+    setGpsLoading(true);
+    const sf=mode==="birds"?setBirdField:setNestField;
+    navigator.geolocation.getCurrentPosition(
+      pos=>{sf("lat",pos.coords.latitude.toString());sf("lng",pos.coords.longitude.toString());setGpsLoading(false);flash("✓ GPS captured")},
+      err=>{setGpsLoading(false);flash("⚠ GPS: "+err.message)},
+      {enableHighAccuracy:true,timeout:15000}
+    );
+  };
+
+  // Save bird
+  const saveBird=async()=>{
+    if(!currentBird.bandCombo&&!currentBird.bandNumber&&!currentBird.territory){flash("⚠ Enter band #, combo, or territory");return}
+    const isEdit=birdRecords.some(r=>r.id===currentBird.id);
+    const updated=isEdit?birdRecords.map(r=>r.id===currentBird.id?currentBird:r):[currentBird,...birdRecords];
+    setBirdRecords(updated);lsSet(KEYS.birds,updated);
+    // Sync to Google Sheet
+    if(scriptUrl){
+      const ok=await syncToSheet(scriptUrl,"bird",currentBird);
+      if(!ok) queueSync("bird",currentBird);
+      flash(ok?"✓ Saved + synced to Sheet":"✓ Saved locally, queued for sync");
+    } else {
+      flash(isEdit?"✓ Record updated":"✓ Saved locally");
+    }
+    setCurrentBird(blankBird({observer:currentBird.observer,territory:currentBird.territory,captureMethod:currentBird.captureMethod,species:currentBird.species,speciesOther:currentBird.speciesOther}));
+    setTab(0);setUnsaved(false);lsDel(KEYS.draft);
+  };
+
+  // Save nest
+  const saveNest=async()=>{
+    if(!currentNest.nestBoxID&&!currentNest.territory){flash("⚠ Enter nest box ID or territory");return}
+    const isEdit=nestRecords.some(r=>r.id===currentNest.id);
+    const updated=isEdit?nestRecords.map(r=>r.id===currentNest.id?currentNest:r):[currentNest,...nestRecords];
+    setNestRecords(updated);lsSet(KEYS.nests,updated);
+    if(scriptUrl){
+      const ok=await syncToSheet(scriptUrl,"nest",currentNest);
+      if(!ok) queueSync("nest",currentNest);
+      flash(ok?"✓ Saved + synced to Sheet":"✓ Saved locally, queued for sync");
+    } else {
+      flash(isEdit?"✓ Nest updated":"✓ Nest saved locally");
+    }
+    setCurrentNest(blankNest({observer:currentNest.observer,territory:currentNest.territory,species:currentNest.species,speciesOther:currentNest.speciesOther,nestBoxID:currentNest.nestBoxID}));
+    setUnsaved(false);lsDel(KEYS.draft);
+  };
+
+  const handleFlush=async()=>{
+    if(!scriptUrl){flash("⚠ Set Sheet URL in Settings first");return}
+    setSyncStatus("Syncing...");
+    const n=await flushQueue(scriptUrl);
+    setSyncStatus("");
+    flash(n>0?`✓ ${n} queued record${n===1?"":"s"} synced`:"No queued records");
+  };
+
+  const records=mode==="birds"?birdRecords:nestRecords;
+  const setRecords=mode==="birds"?setBirdRecords:setNestRecords;
+  const storageKey=mode==="birds"?KEYS.birds:KEYS.nests;
+  const rowFn=mode==="birds"?birdToRow:nestToRow;
+
+  const filteredRecords=search.trim()?records.filter(r=>{
+    const q=search.toLowerCase();
+    return Object.values(r).some(v=>typeof v==="string"&&v.toLowerCase().includes(q));
+  }):records;
+
+  const handleExport=(useFiltered)=>{
+    const data=useFiltered&&search.trim()?filteredRecords:records;
+    if(!data.length){flash("No records");return}
+    const csv=toCSV(data,rowFn);
+    const blob=new Blob([csv],{type:"text/csv"});const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");a.href=url;a.download=`avian_${mode}_${todayStr()}.csv`;a.click();URL.revokeObjectURL(url);
+    flash(`✓ ${data.length} exported`);
+  };
+  const handleCopy=async(useFiltered)=>{
+    const data=useFiltered&&search.trim()?filteredRecords:records;
+    if(!data.length){flash("No records");return}
+    try{await navigator.clipboard.writeText(toCSV(data,rowFn));flash(`✓ ${data.length} copied`)}catch{flash("⚠ Copy failed")}
+  };
+  const handleClearAll=()=>{lsDel(storageKey);setRecords([]);flash("All records cleared")};
+  const handleDelete=id=>{const u=records.filter(r=>r.id!==id);setRecords(u);lsSet(storageKey,u);setConfirmDelete(null);flash("Deleted")};
+
+  if(loading) return <div className="flex items-center justify-center h-screen" style={{background:c.bg,color:c.textDim}}>Loading...</div>;
+
+  return (<div className="min-h-screen flex flex-col" style={{background:c.bg,color:c.text,fontFamily:"'IBM Plex Sans','Segoe UI',sans-serif"}}>
+
+    {/* ── Header ── */}
+    <header className="px-4 pt-3 pb-2">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h1 className="text-lg font-bold tracking-tight" style={{fontFamily:"'JetBrains Mono',monospace",color:c.accent}}>AVIAN CAPTURE</h1>
+          <p className="uppercase tracking-widest" style={{fontSize:9,color:c.textDim}}>Wild Symbioses Lab</p>
+        </div>
+        <div className="flex gap-1.5 items-center">
+          <button onClick={()=>{const n=!sunlight;setSunlight(n);savePrefs({sunlight:n})}} className="rounded-lg flex items-center justify-center shrink-0" style={{width:40,height:40,background:c.bgInput,border:`1px solid ${c.border}`,fontSize:17}}>{sunlight?"🌙":"☀️"}</button>
+          <button onClick={()=>{setView("form");setMode("settings")}} className="rounded-lg flex items-center justify-center shrink-0" style={{width:40,height:40,background:mode==="settings"?c.tabActiveBg:c.bgInput,border:`1px solid ${c.border}`,fontSize:17,position:"relative"}}>
+            ⚙{queueLen>0&&<span className="absolute -top-1 -right-1 rounded-full flex items-center justify-center font-bold" style={{width:16,height:16,fontSize:9,background:"#e88a4a",color:"#fff"}}>{queueLen}</span>}
+          </button>
+        </div>
+      </div>
+
+      {/* Mode switch: Birds / Nests */}
+      {mode!=="settings"&&(
+        <div className="flex gap-2 mb-2">
+          {[{m:"birds",label:"🐦 Birds",icon:""},{m:"nests",label:"🪺 Nests",icon:""}].map(({m,label})=>(
+            <button key={m} onClick={()=>{setMode(m);setView("form");setTab(0);setSearch("")}} className="flex-1 rounded-lg py-2 font-bold uppercase tracking-wider text-center" style={{fontSize:12,minHeight:44,background:mode===m?c.tabActiveBg:"transparent",border:`1.5px solid ${mode===m?c.borderActive:c.border}`,color:mode===m?c.tabActiveText:c.tabInactiveText}}>
+              {label}
+              {(m==="birds"?birdRecords:nestRecords).length>0&&<span className="ml-1 opacity-70">({(m==="birds"?birdRecords:nestRecords).length})</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* View switch */}
+      {mode!=="settings"&&(
+        <div className="flex gap-1.5">
+          <button onClick={()=>setView("form")} className="flex-1 rounded-lg py-1.5 font-bold uppercase tracking-wider text-center" style={{fontSize:10,background:view==="form"?c.tabActiveBg:"transparent",border:`1px solid ${view==="form"?c.borderActive:c.border}`,color:view==="form"?c.tabActiveText:c.textDim}}>Entry</button>
+          <button onClick={()=>setView("list")} className="flex-1 rounded-lg py-1.5 font-bold uppercase tracking-wider text-center" style={{fontSize:10,background:view==="list"?c.tabActiveBg:"transparent",border:`1px solid ${view==="list"?c.borderActive:c.border}`,color:view==="list"?c.tabActiveText:c.textDim}}>Log</button>
+        </div>
+      )}
+    </header>
+
+    {/* Toast */}
+    {toast&&<div className="mx-4 mb-2 rounded-lg px-4 py-3 font-bold text-center" style={{fontSize:13,background:toast.startsWith("⚠")?"#4a3a2a":c.accentBg,border:`1.5px solid ${toast.startsWith("⚠")?"#8a6a3a":c.borderActive}`,color:toast.startsWith("⚠")?"#e8c88a":c.accentText}}>{toast}</div>}
+
+    {/* ══════ SETTINGS ══════ */}
+    {mode==="settings"&&(
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <div className="rounded-lg p-4" style={{background:c.bgCard,border:`1px solid ${c.border}`}}>
+          <p className="font-bold uppercase tracking-wider mb-2" style={{fontSize:11,color:c.textMuted}}>Google Sheets Sync</p>
+          <p className="mb-3" style={{fontSize:12,color:c.textDim}}>Paste your Google Apps Script web app URL here. Every save will push a row to your Sheet automatically.</p>
+          <Inp value={scriptUrl} onChange={v=>{setScriptUrl(v);savePrefs({scriptUrl:v})}} placeholder="https://script.google.com/macros/s/..." c={c}/>
+          {scriptUrl&&<p className="mt-2" style={{fontSize:11,color:c.accent}}>✓ Sheet URL configured</p>}
+        </div>
+        {queueLen>0&&(
+          <div className="rounded-lg p-4" style={{background:c.infoBg,border:`1px solid ${c.border}`}}>
+            <p className="font-bold mb-2" style={{fontSize:13,color:c.infoText}}>{queueLen} record{queueLen===1?"":"s"} queued for sync</p>
+            <p className="mb-3" style={{fontSize:12,color:c.infoText,opacity:0.8}}>These saved locally but failed to reach the Sheet (likely offline).</p>
+            <button onClick={handleFlush} className="w-full rounded-lg py-3 font-bold uppercase" style={{fontSize:12,minHeight:48,background:c.accentBg,border:`1px solid ${c.borderActive}`,color:c.accentText}}>{syncStatus||"Sync Now"}</button>
+          </div>
+        )}
+        <button onClick={()=>setMode("birds")} className="w-full rounded-lg py-3 font-bold uppercase tracking-wider" style={{fontSize:13,minHeight:48,background:c.bgInput,border:`1.5px solid ${c.border}`,color:c.textMuted}}>← Back</button>
+      </div>
+    )}
+
+    {/* ══════ BIRD ENTRY ══════ */}
+    {mode==="birds"&&view==="form"&&(
+      <>
+        <div className="px-3 py-1.5 flex gap-1" style={{borderBottom:`1px solid ${c.border}`}}>
+          {BIRD_TABS.map((tb,i)=>(
+            <button key={tb.label} onClick={()=>setTab(i)} className="flex flex-col items-center justify-center gap-0.5 rounded-lg transition-all flex-1 relative" style={{minHeight:48,padding:"6px 2px",background:tab===i?c.tabActiveBg:"transparent",border:tab===i?`1.5px solid ${c.borderActive}`:"1.5px solid transparent",color:tab===i?c.tabActiveText:c.tabInactiveText,fontWeight:tab===i?700:500}}>
+              <span style={{fontSize:16}}>{tb.icon}</span>
+              <span className="uppercase tracking-wide leading-tight" style={{fontSize:9}}>{tb.label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          {tab===0&&<BirdIDPanel rec={currentBird} setField={setBirdField} c={c} getGPS={getGPS} gpsLoading={gpsLoading}/>}
+          {tab===1&&<MeasurePanel rec={currentBird} setField={setBirdField} c={c}/>}
+          {tab===2&&<SamplesPanel rec={currentBird} setField={setBirdField} c={c}/>}
+          {tab===3&&<NotesPanel rec={currentBird} setField={setBirdField} c={c}/>}
+        </div>
+        <div className="px-4 py-3 flex gap-2 shrink-0" style={{borderTop:`1.5px solid ${c.border}`,background:c.bg}}>
+          {confirmClear?(<>
+            <button onClick={()=>setConfirmClear(false)} className="flex-1 rounded-lg font-bold uppercase" style={{fontSize:12,minHeight:54,background:c.bgInput,border:`1.5px solid ${c.border}`,color:c.textMuted}}>Cancel</button>
+            <button onClick={()=>{setCurrentBird(blankBird());setTab(0);setUnsaved(false);setConfirmClear(false);lsDel(KEYS.draft)}} className="flex-1 rounded-lg font-bold uppercase" style={{fontSize:12,minHeight:54,background:c.dangerBg,border:`1.5px solid ${c.danger}`,color:c.danger}}>Discard</button>
+          </>):(<>
+            <button onClick={()=>{if(unsaved)setConfirmClear(true);else{setCurrentBird(blankBird());setTab(0)}}} className="flex-1 rounded-lg font-bold uppercase" style={{fontSize:13,minHeight:54,background:c.bgInput,border:`1.5px solid ${c.border}`,color:c.textMuted}}>Clear</button>
+            <button onClick={saveBird} className="flex-[2] rounded-lg font-bold uppercase" style={{fontSize:14,minHeight:54,background:c.accentBg,border:`1.5px solid ${c.borderActive}`,color:c.accentText}}>Save Bird</button>
+          </>)}
+        </div>
+      </>
+    )}
+
+    {/* ══════ NEST ENTRY ══════ */}
+    {mode==="nests"&&view==="form"&&(
+      <>
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          <NestForm rec={currentNest} setField={setNestField} c={c} getGPS={getGPS} gpsLoading={gpsLoading}/>
+        </div>
+        <div className="px-4 py-3 flex gap-2 shrink-0" style={{borderTop:`1.5px solid ${c.border}`,background:c.bg}}>
+          {confirmClear?(<>
+            <button onClick={()=>setConfirmClear(false)} className="flex-1 rounded-lg font-bold uppercase" style={{fontSize:12,minHeight:54,background:c.bgInput,border:`1.5px solid ${c.border}`,color:c.textMuted}}>Cancel</button>
+            <button onClick={()=>{setCurrentNest(blankNest());setUnsaved(false);setConfirmClear(false)}} className="flex-1 rounded-lg font-bold uppercase" style={{fontSize:12,minHeight:54,background:c.dangerBg,border:`1.5px solid ${c.danger}`,color:c.danger}}>Discard</button>
+          </>):(<>
+            <button onClick={()=>{if(unsaved)setConfirmClear(true);else setCurrentNest(blankNest())}} className="flex-1 rounded-lg font-bold uppercase" style={{fontSize:13,minHeight:54,background:c.bgInput,border:`1.5px solid ${c.border}`,color:c.textMuted}}>Clear</button>
+            <button onClick={saveNest} className="flex-[2] rounded-lg font-bold uppercase" style={{fontSize:14,minHeight:54,background:c.accentBg,border:`1.5px solid ${c.borderActive}`,color:c.accentText}}>Save Nest Check</button>
+          </>)}
+        </div>
+      </>
+    )}
+
+    {/* ══════ LOG VIEW (shared) ══════ */}
+    {mode!=="settings"&&view==="list"&&(
+      <div className="flex-1 overflow-y-auto">
+        {records.length>0&&(
+          <div className="px-4 pt-3 pb-2 space-y-2" style={{borderBottom:`1px solid ${c.border}`}}>
+            <Inp value={search} onChange={setSearch} placeholder="🔍 Search..." c={c}/>
+            <div className="flex gap-2">
+              <button onClick={()=>handleExport(!!search.trim())} className="flex-1 rounded-lg font-bold uppercase tracking-wider" style={{fontSize:11,minHeight:48,background:c.infoBg,border:`1px solid ${c.border}`,color:c.infoText}}>↓ CSV{search.trim()?` (${filteredRecords.length})`:""}</button>
+              <button onClick={()=>handleCopy(!!search.trim())} className="flex-1 rounded-lg font-bold uppercase tracking-wider" style={{fontSize:11,minHeight:48,background:c.infoBg,border:`1px solid ${c.border}`,color:c.infoText}}>⎘ Copy{search.trim()?` (${filteredRecords.length})`:""}</button>
+              <button onClick={()=>setConfirmDelete("ALL")} className="rounded-lg font-bold uppercase px-3" style={{fontSize:11,minHeight:48,background:c.dangerBg,border:`1px solid ${c.danger}`,color:c.danger}}>Clear</button>
+            </div>
+          </div>
+        )}
+        {confirmDelete==="ALL"&&(
+          <div className="mx-4 mt-3 rounded-lg p-4" style={{background:c.dangerBg,border:`1.5px solid ${c.danger}`}}>
+            <p className="font-bold mb-3" style={{fontSize:14,color:c.danger}}>Delete all {records.length} {mode} records?</p>
+            <div className="flex gap-2">
+              <button onClick={()=>setConfirmDelete(null)} className="flex-1 rounded-lg py-3 font-bold" style={{fontSize:13,background:c.bgInput,border:`1px solid ${c.border}`,color:c.textMuted}}>Cancel</button>
+              <button onClick={()=>{handleClearAll();setConfirmDelete(null)}} className="flex-1 rounded-lg py-3 font-bold" style={{fontSize:13,background:c.dangerBg,border:`1.5px solid ${c.danger}`,color:c.danger}}>Delete All</button>
+            </div>
+          </div>
+        )}
+        {filteredRecords.length===0?(
+          <div className="flex items-center justify-center h-48" style={{color:c.textDim}}><p>{search?"No matches":`No ${mode} records yet.`}</p></div>
+        ):(
+          <div className="px-4 py-3 space-y-2">
+            {search&&<p style={{fontSize:11,color:c.textDim}}>{filteredRecords.length} of {records.length}</p>}
+            {filteredRecords.map(r=>{
+              const isBird=mode==="birds";
+              const title=isBird?(r.bandCombo||r.bandNumber||"No band"):(r.nestBoxID||r.territory||"No box");
+              const subtitle=isBird?null:r.nestFate;
+              const spLabel=r.species==="Other"?r.speciesOther:(SPECIES_LIST.find(s=>s.common===r.species)?.alpha||r.species);
+              return (
+                <div key={r.id} className="rounded-lg p-3" style={{background:c.bgCard,border:`1px solid ${c.border}`}}>
+                  <div className="flex items-start justify-between mb-1">
+                    <div>
+                      <span className="font-bold" style={{fontSize:15,fontFamily:"'JetBrains Mono',monospace",color:c.accent}}>{title}</span>
+                      {r.territory&&isBird&&<span className="ml-2" style={{fontSize:12,color:c.textMuted}}>{r.territory}</span>}
+                    </div>
+                    <span style={{fontSize:10,color:c.textDim,fontFamily:"'JetBrains Mono',monospace"}}>{r.datetime?.replace("T"," ")}</span>
+                  </div>
+                  {spLabel&&<p className="mb-1 italic" style={{fontSize:12,color:c.textMuted}}>{spLabel}</p>}
+                  {subtitle&&<p className="mb-1" style={{fontSize:12,color:subtitle.includes("Failed")?c.poxWarn:c.accent}}>{subtitle}</p>}
+                  {!isBird&&r.clutchSize&&<span className="rounded px-2 py-0.5 mr-1" style={{fontSize:10,background:c.tagBg,color:c.textMuted}}>{r.clutchSize} eggs</span>}
+                  {!isBird&&r.nestlingCount&&<span className="rounded px-2 py-0.5 mr-1" style={{fontSize:10,background:c.tagBg,color:c.textMuted}}>{r.nestlingCount} nestlings</span>}
+                  {!isBird&&r.fledgeCount&&<span className="rounded px-2 py-0.5" style={{fontSize:10,background:c.accentBg,color:c.accentText}}>{r.fledgeCount} fledged</span>}
+                  <div className="flex gap-2 mt-2">
+                    <button onClick={()=>{if(isBird){setCurrentBird({...r});setTab(0)}else setCurrentNest({...r});setView("form");setUnsaved(false)}} className="rounded-lg px-4 font-bold uppercase tracking-wider" style={{fontSize:11,minHeight:44,background:c.bgInput,border:`1px solid ${c.border}`,color:c.textMuted}}>Edit</button>
+                    {confirmDelete===r.id?(
+                      <div className="flex gap-1.5">
+                        <button onClick={()=>handleDelete(r.id)} className="rounded-lg px-3 font-bold uppercase" style={{fontSize:11,minHeight:44,background:c.dangerBg,border:`1px solid ${c.danger}`,color:c.danger}}>Confirm</button>
+                        <button onClick={()=>setConfirmDelete(null)} className="rounded-lg px-3 font-bold uppercase" style={{fontSize:11,minHeight:44,background:c.bgInput,border:`1px solid ${c.border}`,color:c.textMuted}}>Cancel</button>
+                      </div>
+                    ):(
+                      <button onClick={()=>setConfirmDelete(r.id)} className="rounded-lg px-4 font-bold uppercase" style={{fontSize:11,minHeight:44,background:c.dangerBg,border:`1px solid ${c.border}`,color:c.danger}}>Delete</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    )}
+  </div>);
+}
+
+ReactDOM.render(React.createElement(App), document.getElementById('root'));
+</script>
+<script>
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('./sw.js').then(r=>console.log('SW:',r.scope)).catch(e=>console.log('SW fail:',e));
+  });
+}
+</script>
+</body>
+</html>
